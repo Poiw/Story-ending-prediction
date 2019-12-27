@@ -48,30 +48,50 @@ class FeatureNet(nn.Module):
         x1 = self.conv11(x)
         y1 = self.conv12(x1)
 
-        print(y1.shape)
+        # print(y1.shape)
 
         x2 = self.conv21(y1)
         y2 = self.conv22(x2)
 
-        print(y2.shape)
+        # print(y2.shape)
 
         x3 = self.conv31(y2)
         y3 = self.conv32(x3)
 
-        print(y3.shape)
+        # print(y3.shape)
 
         out = self.conv4(y3)
 
-        print(out.shape)
+        # print(out.shape)
 
         return out
 
-class Predictor(nn.Module):
+class BiLSTM(nn.Module): 
     def __init__(self):
+        super(BiLSTM, self).__init__()
+
+        self.bilstm = nn.LSTM(input_size=100, hidden_size=100, num_layers=options.LSTMLayer, bidirectional=True)
+
+    def forward(self, x):
+
+        x = x.permute([2, 0, 1])
+
+        h0 = torch.zeros((options.LSTMLayer*2, x.shape[1], x.shape[2])).cuda()
+        c0 = torch.zeros((options.LSTMLayer*2, x.shape[1], x.shape[2])).cuda()
+
+        output, (hn, cn) = self.bilstm(x, (h0, c0))
+
+        output = torch.max(output, dim=0)[0]
+        output = output.reshape(output.shape[0], output.shape[1], 1)
+
+        return output
+
+class Predictor(nn.Module):
+    def __init__(self, channel=800):
         super(Predictor, self).__init__()
         
         self.conv1 = nn.Sequential(
-            nn.Conv1d(800, 100, 5),
+            nn.Conv1d(channel, 100, 5),
             nn.LeakyReLU()
         )
 
@@ -85,6 +105,6 @@ class Predictor(nn.Module):
 
         maxx = torch.max(xx, dim=1)[0]
 
-        out = maxx.reshape(maxx.shape[0])
+        out = self.sig(maxx.reshape(maxx.shape[0]))
 
         return out
