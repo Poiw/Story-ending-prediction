@@ -8,11 +8,19 @@ import paramcfg
 import data
 import netModel
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
+import math
 
 logging.basicConfig(filename='../log/train.log', format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 options = paramcfg.options
+
+def focal_loss(output, labels):
+
+    loss = 0
+    for out, gth in zip(output, labels):
+        loss = loss + ( - torch.log(1.0 - out) * ((1.0-gth)**2) - torch.log(out) * (gth**2) )
+    
+    return loss / len(output)
 
 def validation(ValLoader, fnet, predictor):
 
@@ -50,8 +58,6 @@ def validation(ValLoader, fnet, predictor):
 
 def main():
 
-    trainwriter = SummaryWriter('../log/train')
-    valwriter = SummaryWriter('../log/validation')
 
     model = gensim.models.Word2Vec.load(options.embeddingmodel)
     model_dict = model.wv
@@ -119,7 +125,7 @@ def main():
 
     opt_f = torch.optim.Adam(fnet.parameters(), lr=options.LR)
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
-    lossfunc = torch.nn.MSELoss()
+    lossfunc = focal_loss
 
 
     for epoch in range(100000):
@@ -153,13 +159,14 @@ def main():
             Loss = (Loss * step + loss.item()) / (step + 1)
 
         logging.info('Epoch Loss: {}'.format(Loss))
-        trainwriter.add_scalar('loss', Loss, epoch)
 
         acc = validation(ValLoader, fnet, predictor)
 
         logging.info('validation acc: {}'.format(acc))
-        valwriter.add_scalar('acc', acc, epoch)
 
+    if epoch % 10 == 0:
+        torch.save(fnet.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
+        torch.save(predictor.state_dict(), '../Models/predictors/epoch' + str(epoch) + '.para')
 
 
 
