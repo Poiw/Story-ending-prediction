@@ -8,11 +8,12 @@ import paramcfg
 import data
 import netModel
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 import math
 
-logging.basicConfig(filename='../log/train.log', format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
-
 options = paramcfg.options
+
+
 
 def focal_loss(output, labels):
 
@@ -66,10 +67,16 @@ def main():
             os.mkdir(options.logdir+'cnn'+str(i))
             os.mkdir(options.logdir+'lstm'+str(i))
         os.mkdir(options.logdir+'predictor')
+
+        os.mkdir(options.logdir+'board')
             
     else:
         print('Current directory exists already!')
         exit(0)
+
+    writer = SummaryWriter(options.logdir + 'board/')
+    
+    logging.basicConfig(filename=options.logdir+'train.log', format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
     logging.info('{}'.format(options))
 
@@ -191,8 +198,10 @@ def main():
             Loss = (Loss * step + loss.item()) / (step + 1)
 
         logging.info('Epoch Loss: {}'.format(Loss))
+        writer.add_scalar('loss', Loss, epoch)
 
         acc = validation(ValLoader, fnetlstm, fnetcnn, predictor)
+        writer.add_scalar('val acc', acc, epoch)
 
         logging.info('validation acc: {}'.format(acc))
 
