@@ -84,46 +84,46 @@ def main():
     model_dict = model.wv
 
     # load train data
-    length = 0
-    csvdata = pandas.read_csv('../Data/train.csv')
-    traindata = []
-    trainlabels = []
-    for i in range(len(csvdata)):
-        story = list(csvdata.loc[i])
-        traindata.append(story)
-        trainlabels.append(1.0)
-
-        if torch.rand(()) > 0.5:
-            index = torch.randint(4, ()).item()
-
-            tmp = story[index]
-            tmps = story[index+1:5]
-            story[index:-1] = tmps
-            story[4] = tmp
-
-            traindata.append(story)
-            trainlabels.append(0.0)
-
-    # csvdata = pandas.read_csv('../Data/val.csv')
-    # length = int(len(csvdata)/10*9)
+    # length = 0
+    # csvdata = pandas.read_csv('../Data/train.csv')
     # traindata = []
     # trainlabels = []
-    # for i in range(length):
+    # for i in range(len(csvdata)):
     #     story = list(csvdata.loc[i])
+    #     traindata.append(story)
+    #     trainlabels.append(1.0)
 
-    #     endlabel = int(story[-1])
-    #     if endlabel == 1:
-    #         traindata.append(story[:5])
-    #         trainlabels.append(1.0)
+    #     if torch.rand(()) > 0.5:
+    #         index = torch.randint(4, ()).item()
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(0.0)     
-    #     else:
-    #         traindata.append(story[:5])
+    #         tmp = story[index]
+    #         tmps = story[index+1:5]
+    #         story[index:-1] = tmps
+    #         story[4] = tmp
+
+    #         traindata.append(story)
     #         trainlabels.append(0.0)
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(1.0)     
+    csvdata = pandas.read_csv('../Data/val.csv')
+    length = int(len(csvdata)/5*4)
+    traindata = []
+    trainlabels = []
+    for i in range(length):
+        story = list(csvdata.loc[i])
+
+        endlabel = int(story[-1])
+        if endlabel == 1:
+            traindata.append(story[:5])
+            trainlabels.append(1.0)
+
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(0.0)     
+        else:
+            traindata.append(story[:5])
+            trainlabels.append(0.0)
+
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(1.0)     
 
     trainSet = data.TrainDataSet(traindata, model_dict, trainlabels)
     TrainLoader = DataLoader(trainSet, batch_size=options.BS, shuffle=True, num_workers=4, drop_last=False, collate_fn=data.train_collate_fn)
@@ -158,6 +158,8 @@ def main():
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
     lossfunc = focal_loss
 
+
+    print('start training...')
 
     for epoch in range(100000):
 

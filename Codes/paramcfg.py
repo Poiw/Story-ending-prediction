@@ -15,9 +15,9 @@ def parse_arg():
     
 
 
-    parser.add_argument('--BS', type=int, default=256)
-    parser.add_argument('--LR', type=float, default=0.00001)
-    parser.add_argument('--LSTMLayer', type=int, default=1)
+    parser.add_argument('--BS', type=int, default=64)
+    parser.add_argument('--LR', type=float, default=0.001)
+    parser.add_argument('--LSTMLayer', type=int, default=4)
 
     # return the params
     opt = parser.parse_args()
