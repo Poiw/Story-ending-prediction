@@ -16,13 +16,15 @@ options = paramcfg.options
 
 def focal_loss(output, labels):
 
-    loss = 0
-    for out, gth in zip(output, labels):
-        loss = loss + ( - torch.log(1.0 - out) * ((1.0-gth)**2) - torch.log(out) * (gth**2) )
-    
-    return loss / len(output)
+    return -torch.mean(torch.log(1 - output + 1e-4) * (1 - labels) + torch.log(output + 1e-4) * labels)
 
-def validation(ValLoader, fnet, predictor):
+    # loss = 0
+    # for out, gth in zip(output, labels):
+    #     loss = loss + ( - torch.log(1.0 - out) * ((1.0-gth)**2) - torch.log(out) * (gth**2) )
+    
+    # return loss / len(output)
+
+def validation(ValLoader, fnetlstm, fnetcnn, predictor):
 
     success = 0
     failed = 0
@@ -37,9 +39,9 @@ def validation(ValLoader, fnet, predictor):
             body = []
             ends = []
             for s in x:
-                body.append(fnet(s))
+                body.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
             for s in y:
-                ends.append(fnet(s))
+                ends.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
 
             batchsize = len(labels)
 
@@ -58,11 +60,13 @@ def validation(ValLoader, fnet, predictor):
 
 def main():
 
+    logging.info('{}'.format(options))
 
     model = gensim.models.Word2Vec.load(options.embeddingmodel)
     model_dict = model.wv
 
     # load train data
+    length = 0
     csvdata = pandas.read_csv('../Data/train.csv')
     traindata = []
     trainlabels = []
@@ -83,7 +87,7 @@ def main():
             trainlabels.append(0.0)
 
     # csvdata = pandas.read_csv('../Data/val.csv')
-    # length = int(len(csvdata)/10*9)
+    # length = int(len(csvdata)/5*4)
     # traindata = []
     # trainlabels = []
     # for i in range(length):
@@ -110,20 +114,23 @@ def main():
     csvdata = pandas.read_csv('../Data/val.csv')
     valdata = []
     vallabels = []
-    for i in range(len(csvdata)):
+    for i in range(length, len(csvdata)):
         story = list(csvdata.loc[i])
         valdata.append(story[:-1])
         vallabels.append(int(story[-1]))
     valSet = data.ValidDataSet(valdata, model_dict, vallabels)
-    ValLoader = DataLoader(valSet, batch_size=1, shuffle=False, num_workers=4, drop_last=False, collate_fn=data.valid_collate_fn)
+    ValLoader = DataLoader(valSet, batch_size=options.BS, shuffle=False, num_workers=4, drop_last=False, collate_fn=data.valid_collate_fn)
 
     # fnet = netModel.FeatureNet()
-    fnet = netModel.BiLSTM()
-    fnet.cuda()
-    predictor = netModel.Predictor(200)
+    fnetlstm = netModel.BiLSTM()
+    fnetlstm.cuda()
+    fnetcnn = netModel.CNN()
+    fnetcnn.cuda()
+    predictor = netModel.Predictor(400)
     predictor.cuda()
 
-    opt_f = torch.optim.Adam(fnet.parameters(), lr=options.LR)
+    opt_lstm = torch.optim.Adam(fnetlstm.parameters(), lr=options.LR)
+    opt_cnn = torch.optim.Adam(fnetcnn.parameters(), lr=options.LR)
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
     lossfunc = focal_loss
 
@@ -141,18 +148,23 @@ def main():
             labels = labels.cuda()
 
             for s in sentences:
-                features.append(fnet(s))
+                features.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
 
             output = predictor(features[0], features[1], features[2], features[3], features[4])
 
             loss = lossfunc(output, labels)
 
-            opt_f.zero_grad()
+            opt_lstm.zero_grad()
+            opt_cnn.zero_grad()
             opt_p.zero_grad()
             
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(fnetlstm.parameters(), max_norm=0.2, norm_type=2)
+            torch.nn.utils.clip_grad_norm_(fnetcnn.parameters(), max_norm=0.2, norm_type=2)
+            torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
 
-            opt_f.step()
+            opt_lstm.step()
+            opt_cnn.step()
             opt_p.step()
 
             # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
@@ -160,13 +172,14 @@ def main():
 
         logging.info('Epoch Loss: {}'.format(Loss))
 
-        acc = validation(ValLoader, fnet, predictor)
+        acc = validation(ValLoader, fnetlstm, fnetcnn, predictor)
 
         logging.info('validation acc: {}'.format(acc))
 
-    if epoch % 10 == 0:
-        torch.save(fnet.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
-        torch.save(predictor.state_dict(), '../Models/predictors/epoch' + str(epoch) + '.para')
+        # torch.save(fnet_lstm.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
+        # torch.save(fnet_cnn.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
+        # torch.save(predictor.state_dict(), '../Models/predictors/epoch' + str(epoch) + '.para')
+        logging.info('saving {} epoch models'.format(epoch))
 
 
 

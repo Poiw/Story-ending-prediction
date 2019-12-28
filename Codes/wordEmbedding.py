@@ -29,6 +29,17 @@ for column in data.columns:
         tmp[idx] = tmp[idx].split()[:-1]
         maxlength = max(maxlength, len(tmp[idx]))
     sentences = sentences + tmp
+
+data = pandas.read_csv('../Data/test.csv')
+for column in data.columns:
+    print(column)
+    if column == 'AnswerRightEnding':
+        continue
+    tmp = list(data[column].loc[:])
+    for idx in range(len(tmp)):
+        tmp[idx] = tmp[idx].split()[:-1]
+        maxlength = max(maxlength, len(tmp[idx]))
+    sentences = sentences + tmp
  
 fname = options.embeddingmodel
 if os.path.exists(fname):
@@ -36,7 +47,7 @@ if os.path.exists(fname):
     model = gensim.models.Word2Vec.load(fname)
 else:
     # can take a few minutes, grab a cuppa
-    model = gensim.models.Word2Vec(sentences, size=100, min_count=1, workers=4, iter=10000) 
+    model = gensim.models.Word2Vec(sentences, size=100, min_count=1, workers=4, iter=200) 
     model.save(fname)
 
 print('Max Length: ', maxlength)
