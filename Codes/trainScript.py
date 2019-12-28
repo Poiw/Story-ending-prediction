@@ -198,7 +198,7 @@ def main():
             Loss = (Loss * step + loss.item()) / (step + 1)
 
         logging.info('Epoch Loss: {}'.format(Loss))
-        writer.add_scalar('loss', Loss, epoch)
+        writer.add_scalar('train loss', Loss, epoch)
 
         acc = validation(ValLoader, fnetlstm, fnetcnn, predictor)
         writer.add_scalar('val acc', acc, epoch)
