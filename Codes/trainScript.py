@@ -38,10 +38,10 @@ def validation(ValLoader, fnetlstm, fnetcnn, predictor):
             
             body = []
             ends = []
-            for s in x:
-                body.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
+            for i, s in enumerate(x):
+                body.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
             for s in y:
-                ends.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
+                ends.append(torch.cat((fnetlstm[4](s), fnetcnn[4](s)), dim=1))
 
             batchsize = len(labels)
 
@@ -59,6 +59,17 @@ def validation(ValLoader, fnetlstm, fnetcnn, predictor):
     return success / (success + failed)
 
 def main():
+
+    if not os.path.exists(options.logdir):
+        os.mkdir(options.logdir)
+        for i in range(5):
+            os.mkdir(options.logdir+'cnn'+str(i))
+            os.mkdir(options.logdir+'lstm'+str(i))
+        os.mkdir(options.logdir+'predictor')
+            
+    else:
+        print('Current directory exists already!')
+        exit(0)
 
     logging.info('{}'.format(options))
 
@@ -122,15 +133,21 @@ def main():
     ValLoader = DataLoader(valSet, batch_size=options.BS, shuffle=False, num_workers=4, drop_last=False, collate_fn=data.valid_collate_fn)
 
     # fnet = netModel.FeatureNet()
-    fnetlstm = netModel.BiLSTM()
-    fnetlstm.cuda()
-    fnetcnn = netModel.CNN()
-    fnetcnn.cuda()
+    fnetlstm = []
+    fnetcnn = []
+    for i in range(5):
+        fnetlstm.append(netModel.BiLSTM())
+        fnetlstm[i].cuda()
+        fnetcnn.append(netModel.CNN())
+        fnetcnn[i].cuda()
     predictor = netModel.Predictor(400)
     predictor.cuda()
 
-    opt_lstm = torch.optim.Adam(fnetlstm.parameters(), lr=options.LR)
-    opt_cnn = torch.optim.Adam(fnetcnn.parameters(), lr=options.LR)
+    opt_lstm = []
+    opt_cnn = []
+    for i in range(5):
+        opt_lstm.append(torch.optim.Adam(fnetlstm[i].parameters(), lr=options.LR))
+        opt_cnn.append(torch.optim.Adam(fnetcnn[i].parameters(), lr=options.LR))
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
     lossfunc = focal_loss
 
@@ -147,24 +164,27 @@ def main():
             sentences = sentences.cuda()
             labels = labels.cuda()
 
-            for s in sentences:
-                features.append(torch.cat((fnetlstm(s), fnetcnn(s)), dim=1))
+            for i, s in enumerate(sentences):
+                features.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
 
             output = predictor(features[0], features[1], features[2], features[3], features[4])
 
             loss = lossfunc(output, labels)
 
-            opt_lstm.zero_grad()
-            opt_cnn.zero_grad()
+            for i in range(5):
+                opt_lstm[i].zero_grad()
+                opt_cnn[i].zero_grad()
             opt_p.zero_grad()
             
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(fnetlstm.parameters(), max_norm=0.2, norm_type=2)
-            torch.nn.utils.clip_grad_norm_(fnetcnn.parameters(), max_norm=0.2, norm_type=2)
+            for i in range(5):
+                torch.nn.utils.clip_grad_norm_(fnetlstm[i].parameters(), max_norm=0.2, norm_type=2)
+                torch.nn.utils.clip_grad_norm_(fnetcnn[i].parameters(), max_norm=0.2, norm_type=2)
             torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
 
-            opt_lstm.step()
-            opt_cnn.step()
+            for i in range(5):
+                opt_lstm[i].step()
+                opt_cnn[i].step()
             opt_p.step()
 
             # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
@@ -176,9 +196,10 @@ def main():
 
         logging.info('validation acc: {}'.format(acc))
 
-        # torch.save(fnet_lstm.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
-        # torch.save(fnet_cnn.state_dict(), '../Models/fnets/epoch' + str(epoch) + '.para')
-        # torch.save(predictor.state_dict(), '../Models/predictors/epoch' + str(epoch) + '.para')
+        for i in range(5):
+            torch.save(fnetlstm[i].state_dict(), options.logdir+'lstm' + str(i) + '/epoch' + str(epoch) + '.para')
+            torch.save(fnetcnn[i].state_dict(),  options.logdir+'cnn' + str(i) + '/epoch' + str(epoch) + '.para')
+        torch.save(predictor.state_dict(), options.logdir+'predictor' + '/epoch' + str(epoch) + '.para')
         logging.info('saving {} epoch models'.format(epoch))
 
 

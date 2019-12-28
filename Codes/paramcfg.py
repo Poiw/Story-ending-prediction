@@ -11,6 +11,7 @@ def parse_arg():
     parser.add_argument('--dim', type=int, default=100)
     parser.add_argument('--maxSentenceLength', type=int, default=30)
     parser.add_argument('--embeddingmodel', type=str, default='../Models/embedding.model')
+    parser.add_argument('--logdir', type=str, default='../Models/tmp/')
     
 
 
