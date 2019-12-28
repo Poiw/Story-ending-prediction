@@ -25,7 +25,7 @@ def focal_loss(output, labels):
     
     # return loss / len(output)
 
-def validation(ValLoader, fnetlstm, fnetcnn, predictor):
+def validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor):
 
     success = 0
     failed = 0
@@ -40,9 +40,9 @@ def validation(ValLoader, fnetlstm, fnetcnn, predictor):
             body = []
             ends = []
             for i, s in enumerate(x):
-                body.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                body.append(fnetlstm_b(s))
             for s in y:
-                ends.append(torch.cat((fnetlstm[4](s), fnetcnn[4](s)), dim=1))
+                ends.append(fnetlstm_e(s))
 
             batchsize = len(labels)
 
@@ -63,9 +63,8 @@ def main():
 
     if not os.path.exists(options.logdir):
         os.mkdir(options.logdir)
-        for i in range(5):
-            os.mkdir(options.logdir+'cnn'+str(i))
-            os.mkdir(options.logdir+'lstm'+str(i))
+        os.mkdir(options.logdir+'lstm_b')
+        os.mkdir(options.logdir+'lstm_e')
         os.mkdir(options.logdir+'predictor')
 
         os.mkdir(options.logdir+'board')
@@ -84,46 +83,46 @@ def main():
     model_dict = model.wv
 
     # load train data
-    length = 0
-    csvdata = pandas.read_csv('../Data/train.csv')
-    traindata = []
-    trainlabels = []
-    for i in range(len(csvdata)):
-        story = list(csvdata.loc[i])
-        traindata.append(story)
-        trainlabels.append(1.0)
-
-        if torch.rand(()) > 0.5:
-            index = torch.randint(4, ()).item()
-
-            tmp = story[index]
-            tmps = story[index+1:5]
-            story[index:-1] = tmps
-            story[4] = tmp
-
-            traindata.append(story)
-            trainlabels.append(0.0)
-
-    # csvdata = pandas.read_csv('../Data/val.csv')
-    # length = int(len(csvdata)/10*9)
+    # length = 0
+    # csvdata = pandas.read_csv('../Data/train.csv')
     # traindata = []
     # trainlabels = []
-    # for i in range(length):
+    # for i in range(len(csvdata)):
     #     story = list(csvdata.loc[i])
+    #     traindata.append(story)
+    #     trainlabels.append(1.0)
 
-    #     endlabel = int(story[-1])
-    #     if endlabel == 1:
-    #         traindata.append(story[:5])
-    #         trainlabels.append(1.0)
+    #     if torch.rand(()) > 0.5:
+    #         index = torch.randint(4, ()).item()
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(0.0)     
-    #     else:
-    #         traindata.append(story[:5])
+    #         tmp = story[index]
+    #         tmps = story[index+1:5]
+    #         story[index:-1] = tmps
+    #         story[4] = tmp
+
+    #         traindata.append(story)
     #         trainlabels.append(0.0)
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(1.0)     
+    csvdata = pandas.read_csv('../Data/val.csv')
+    length = int(len(csvdata)/10*9)
+    traindata = []
+    trainlabels = []
+    for i in range(length):
+        story = list(csvdata.loc[i])
+
+        endlabel = int(story[-1])
+        if endlabel == 1:
+            traindata.append(story[:5])
+            trainlabels.append(1.0)
+
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(0.0)     
+        else:
+            traindata.append(story[:5])
+            trainlabels.append(0.0)
+
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(1.0)     
 
     trainSet = data.TrainDataSet(traindata, model_dict, trainlabels)
     TrainLoader = DataLoader(trainSet, batch_size=options.BS, shuffle=True, num_workers=4, drop_last=False, collate_fn=data.train_collate_fn)
@@ -140,21 +139,15 @@ def main():
     ValLoader = DataLoader(valSet, batch_size=options.BS, shuffle=False, num_workers=4, drop_last=False, collate_fn=data.valid_collate_fn)
 
     # fnet = netModel.FeatureNet()
-    fnetlstm = []
-    fnetcnn = []
-    for i in range(5):
-        fnetlstm.append(netModel.BiLSTM())
-        fnetlstm[i].cuda()
-        fnetcnn.append(netModel.CNN())
-        fnetcnn[i].cuda()
-    predictor = netModel.Predictor(400)
+    fnetlstm_b = netModel.BiLSTM()
+    fnetlstm_b.cuda()
+    fnetlstm_e = netModel.BiLSTM()
+    fnetlstm_e.cuda()
+    predictor = netModel.Predictor(200)
     predictor.cuda()
 
-    opt_lstm = []
-    opt_cnn = []
-    for i in range(5):
-        opt_lstm.append(torch.optim.Adam(fnetlstm[i].parameters(), lr=options.LR))
-        opt_cnn.append(torch.optim.Adam(fnetcnn[i].parameters(), lr=options.LR))
+    opt_lstm_b = torch.optim.Adam(fnetlstm_b.parameters(), lr=options.LR)
+    opt_lstm_e = torch.optim.Adam(fnetlstm_e.parameters(), lr=options.LR)
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
     lossfunc = focal_loss
 
@@ -172,26 +165,27 @@ def main():
             labels = labels.cuda()
 
             for i, s in enumerate(sentences):
-                features.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                if i < 4:
+                    features.append((fnetlstm_b(s)))
+                else:
+                    features.append((fnetlstm_e(s)))
+
 
             output = predictor(features[0], features[1], features[2], features[3], features[4])
 
             loss = lossfunc(output, labels)
 
-            for i in range(5):
-                opt_lstm[i].zero_grad()
-                opt_cnn[i].zero_grad()
+            opt_lstm_b.zero_grad()
+            opt_lstm_e.zero_grad()
             opt_p.zero_grad()
             
             loss.backward()
-            for i in range(5):
-                torch.nn.utils.clip_grad_norm_(fnetlstm[i].parameters(), max_norm=0.2, norm_type=2)
-                torch.nn.utils.clip_grad_norm_(fnetcnn[i].parameters(), max_norm=0.2, norm_type=2)
+            torch.nn.utils.clip_grad_norm_(fnetlstm_b.parameters(), max_norm=0.2, norm_type=2)
+            torch.nn.utils.clip_grad_norm_(fnetlstm_e.parameters(), max_norm=0.2, norm_type=2)
             torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
 
-            for i in range(5):
-                opt_lstm[i].step()
-                opt_cnn[i].step()
+            opt_lstm_b.step()
+            opt_lstm_e.step()
             opt_p.step()
 
             # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
@@ -200,14 +194,13 @@ def main():
         logging.info('Epoch Loss: {}'.format(Loss))
         writer.add_scalar('train_loss', Loss, epoch)
 
-        acc = validation(ValLoader, fnetlstm, fnetcnn, predictor)
+        acc = validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor)
         writer.add_scalar('val_acc', acc, epoch)
 
         logging.info('validation acc: {}'.format(acc))
 
-        for i in range(5):
-            torch.save(fnetlstm[i].state_dict(), options.logdir+'lstm' + str(i) + '/epoch' + str(epoch) + '.para')
-            torch.save(fnetcnn[i].state_dict(),  options.logdir+'cnn' + str(i) + '/epoch' + str(epoch) + '.para')
+        torch.save(fnetlstm_b.state_dict(), options.logdir+'lstm_b' + '/epoch' + str(epoch) + '.para')
+        torch.save(fnetlstm_e.state_dict(), options.logdir+'lstm_e' + '/epoch' + str(epoch) + '.para')
         torch.save(predictor.state_dict(), options.logdir+'predictor' + '/epoch' + str(epoch) + '.para')
         logging.info('saving {}th epoch models'.format(epoch))
 
