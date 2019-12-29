@@ -14,9 +14,12 @@ import shutil
 
 options = paramcfg.options
 
-def focal_loss(output, labels):
 
-    return -torch.mean(torch.log(1 - output + 1e-4) * (1 - labels) + torch.log(output + 1e-4) * labels)
+def focal_loss(times = 1):
+    def f(output, labels):
+        nonlocal times
+        return -torch.mean(torch.log(1 - output + 1e-4) * (1 - labels)**times + torch.log(output + 1e-4) * labels**times)
+    return f
 
     # loss = 0
     # for out, gth in zip(output, labels):
@@ -26,6 +29,7 @@ def focal_loss(output, labels):
 
 def hinge_loss(output, labels):
     labels[labels < 0.5] = -1
+    output = output * 2 - 1
     return torch.mean(torch.max(torch.zeros_like(labels), 1 - labels*output))
 
 def validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor):
@@ -97,49 +101,88 @@ def main():
         traindata.append(story)
         trainlabels.append(1.0)
 
-        if torch.rand(()) > 0.5:
-            index = torch.randint(4, ()).item()
+        # if torch.rand(()).item() > 0.9:
+        #     if torch.rand(()).item() > 1:
+        #         story_random_end = story
+        #         index = torch.randint(len(csvdata), ()).item()
+        #         other_story = list(csvdata.loc[index])
+        #         story_random_end[4] = other_story[4]
+        #         traindata.append(story_random_end)
+        #         if index == i:
+        #             trainlabels.append(1.0)
+        #         else:
+        #             trainlabels.append(0.0)
 
-            tmp = story[index]
-            tmps = story[index+1:5]
-            story[index:-1] = tmps
-            story[4] = tmp
+        #     else:
+        #         index = torch.randint(4, ()).item()
 
-            traindata.append(story)
-            trainlabels.append(0.0)
+        #         tmp = story[index]
+        #         tmps = story[index+1:5]
+        #         story[index:-1] = tmps
+        #         story[4] = tmp
 
-    # csvdata = pandas.read_csv('../Data/val.csv')
-    # length = int(len(csvdata)/5*4)
+        #         traindata.append(story)
+        #         trainlabels.append(0.0)
+
+    csvdata = pandas.read_csv('../Data/val.csv')
+    print(len(csvdata))
+    length = int(len(csvdata) * 0.4)
     # traindata = []
     # trainlabels = []
-    # for i in range(length):
-    #     story = list(csvdata.loc[i])
+    for i in range(length):
+        story = list(csvdata.loc[i])
 
-    #     endlabel = int(story[-1])
-    #     if endlabel == 1:
-    #         traindata.append(story[:5])
-    #         trainlabels.append(1.0)
+        endlabel = int(story[-1])
+        if endlabel == 1:
+            traindata.append(story[:5])
+            trainlabels.append(1.0)
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(0.0)     
-    #     else:
-    #         traindata.append(story[:5])
-    #         trainlabels.append(0.0)
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(0.0)     
+        else:
+            traindata.append(story[:5])
+            trainlabels.append(0.0)
 
-    #         traindata.append(story[:4] + story[5:6])
-    #         trainlabels.append(1.0)     
+            traindata.append(story[:4] + story[5:6])
+            trainlabels.append(1.0)     
+
+    counter0 = 0
+    counter1 = 0
+    for label in trainlabels:
+        if label > 0.5:
+            counter1 += 1
+        else:
+            counter0 += 1
+    
+    logging.info('train data: {}:{}={}'.format(counter0, counter1, counter0/counter1))
 
     trainSet = data.TrainDataSetBE(traindata, model_dict, trainlabels)
     TrainLoader = DataLoader(trainSet, batch_size=options.BS, shuffle=True, num_workers=4, drop_last=False, collate_fn=data.train_collate_fn_BE)
 
 
+    counter = [0, 0, 0]
     csvdata = pandas.read_csv('../Data/val.csv')
     valdata = []
     vallabels = []
     for i in range(length, len(csvdata)):
         story = list(csvdata.loc[i])
+
+        labels = int(story[-1])
+
+        if length > 0 and counter[labels] > counter[3-labels]:
+            s4 = story[4]
+            s5 = story[5]
+
+            story[4] = s5
+            story[5] = s4
+
+            labels = 3 - labels
+
+        counter[labels] += 1
+
         valdata.append(story[:-1])
-        vallabels.append(int(story[-1]))
+        vallabels.append(labels)
+    logging.info('Validation ratio: {}:{}={}'.format(counter[1], counter[2], counter[1]/counter[2]))
     valSet = data.ValidDataSetBE(valdata, model_dict, vallabels)
     ValLoader = DataLoader(valSet, batch_size=options.BS, shuffle=False, num_workers=4, drop_last=False, collate_fn=data.valid_collate_fn_BE)
 
@@ -154,67 +197,74 @@ def main():
     opt_lstm_b = torch.optim.Adam(fnetlstm_b.parameters(), lr=options.LR)
     opt_lstm_e = torch.optim.Adam(fnetlstm_e.parameters(), lr=options.LR)
     opt_p = torch.optim.Adam(predictor.parameters(), lr=options.LR)
-    lossfunc = hinge_loss
-
+    lossfunc = focal_loss(2)
 
     print('start training...')
 
     curmax_acc = 0
 
-    for epoch in range(100000):
+    with open(options.logdir+'loss.txt','w') as f:
 
-        logging.info('epoch: {}'.format(epoch))
 
-        Loss = 0
-        for step, (body, end, labels) in enumerate(TrainLoader):
+        for epoch in range(100000):
 
-            body = body.cuda()
-            end = end.cuda()
-            labels = labels.cuda()
+            logging.info('epoch: {}'.format(epoch))
 
-            body_h = fnetlstm_b(body)
-            end_h = fnetlstm_e(end)
+            Loss = 0
+            for step, (body, end, labels) in enumerate(TrainLoader):
 
-            output = predictor(body_h, end_h)
+                body = body.cuda()
+                end = end.cuda()
+                labels = labels.cuda()
 
-            loss = lossfunc(output, labels)
+                body_h = fnetlstm_b(body)
+                end_h = fnetlstm_e(end)
 
-            opt_lstm_b.zero_grad()
-            opt_lstm_e.zero_grad()
-            opt_p.zero_grad()
-            
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(fnetlstm_b.parameters(), max_norm=0.2, norm_type=2)
-            torch.nn.utils.clip_grad_norm_(fnetlstm_e.parameters(), max_norm=0.2, norm_type=2)
-            torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
+                output = predictor(body_h, end_h)
 
-            opt_lstm_b.step()
-            opt_lstm_e.step()
-            opt_p.step()
+                loss = lossfunc(output, labels)
 
-            # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
-            Loss = (Loss * step + loss.item()) / (step + 1)
+                opt_lstm_b.zero_grad()
+                opt_lstm_e.zero_grad()
+                opt_p.zero_grad()
+                
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(fnetlstm_b.parameters(), max_norm=0.2, norm_type=2)
+                torch.nn.utils.clip_grad_norm_(fnetlstm_e.parameters(), max_norm=0.2, norm_type=2)
+                torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
 
-        logging.info('Epoch Loss: {}'.format(Loss))
-        writer.add_scalar('train_loss', Loss, epoch)
+                opt_lstm_b.step()
+                opt_lstm_e.step()
+                opt_p.step()
 
-        acc = validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor)
-        writer.add_scalar('val_acc', acc, epoch)
+                if step % 100 == 0:
+                    acc = validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor)
+                    logging.info('validation acc: {}'.format(acc))
 
-        logging.info('validation acc: {}'.format(acc))
-        logging.info('best acc: {}'.format(curmax_acc))
+                # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
+                Loss = (Loss * step + loss.item()) / (step + 1)
 
-        torch.save(fnetlstm_b.state_dict(), options.logdir+'lstm_b' + '/epoch' + str(epoch) + '.para')
-        torch.save(fnetlstm_e.state_dict(), options.logdir+'lstm_e' + '/epoch' + str(epoch) + '.para')
-        torch.save(predictor.state_dict(), options.logdir+'predictor' + '/epoch' + str(epoch) + '.para')
+            logging.info('Epoch Loss: {}'.format(Loss))
+            writer.add_scalar('train_loss', Loss, epoch)
 
-        if acc > curmax_acc:
-            curmax_acc = acc
-            torch.save(fnetlstm_b.state_dict(), options.logdir+'lstm_b' + '/best.para')
-            torch.save(fnetlstm_e.state_dict(), options.logdir+'lstm_e' + '/best.para')
-            torch.save(predictor.state_dict(), options.logdir+'predictor' + '/best.para')
+            acc = validation(ValLoader, fnetlstm_b, fnetlstm_e, predictor)
+            writer.add_scalar('val_acc', acc, epoch)
 
-        logging.info('saving {}th epoch models'.format(epoch))
+            logging.info('validation acc: {}'.format(acc))
+            logging.info('best acc: {}'.format(curmax_acc))
+
+            torch.save(fnetlstm_b.state_dict(), options.logdir+'lstm_b' + '/epoch' + str(epoch) + '.para')
+            torch.save(fnetlstm_e.state_dict(), options.logdir+'lstm_e' + '/epoch' + str(epoch) + '.para')
+            torch.save(predictor.state_dict(), options.logdir+'predictor' + '/epoch' + str(epoch) + '.para')
+
+            if acc > curmax_acc:
+                curmax_acc = acc
+                torch.save(fnetlstm_b.state_dict(), options.logdir+'lstm_b' + '/best.para')
+                torch.save(fnetlstm_e.state_dict(), options.logdir+'lstm_e' + '/best.para')
+                torch.save(predictor.state_dict(), options.logdir+'predictor' + '/best.para')
+
+            logging.info('saving {}th epoch models'.format(epoch))
+            f.write('{} {}\n'.format(Loss, acc))
 
 
 

@@ -15,9 +15,9 @@ options = paramcfg.options
 
 
 
-def focal_loss(output, labels):
+def focal_loss(output, labels, times = 1):
 
-    return -torch.mean(torch.log(1 - output + 1e-4) * (1 - labels) + torch.log(output + 1e-4) * labels)
+    return -torch.mean(torch.log(1 - output + 1e-4) * (1 - labels)**times + torch.log(output + 1e-4) * labels**times)
 
     # loss = 0
     # for out, gth in zip(output, labels):
@@ -40,9 +40,11 @@ def validation(ValLoader, fnetlstm, fnetcnn, predictor):
             body = []
             ends = []
             for i, s in enumerate(x):
-                body.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                # body.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                body.append(fnetlstm[i](s))
             for s in y:
-                ends.append(torch.cat((fnetlstm[4](s), fnetcnn[4](s)), dim=1))
+                # ends.append(torch.cat((fnetlstm[4](s), fnetcnn[4](s)), dim=1))
+                ends.append(fnetlstm[4](s))
 
             batchsize = len(labels)
 
@@ -84,46 +86,46 @@ def main():
     model_dict = model.wv
 
     # load train data
-    # length = 0
-    # csvdata = pandas.read_csv('../Data/train.csv')
-    # traindata = []
-    # trainlabels = []
-    # for i in range(len(csvdata)):
-    #     story = list(csvdata.loc[i])
-    #     traindata.append(story)
-    #     trainlabels.append(1.0)
-
-    #     if torch.rand(()) > 0.5:
-    #         index = torch.randint(4, ()).item()
-
-    #         tmp = story[index]
-    #         tmps = story[index+1:5]
-    #         story[index:-1] = tmps
-    #         story[4] = tmp
-
-    #         traindata.append(story)
-    #         trainlabels.append(0.0)
-
-    csvdata = pandas.read_csv('../Data/val.csv')
-    length = int(len(csvdata)/5*4)
+    length = 0
+    csvdata = pandas.read_csv('../Data/train.csv')
     traindata = []
     trainlabels = []
-    for i in range(length):
+    for i in range(len(csvdata)):
         story = list(csvdata.loc[i])
+        traindata.append(story)
+        trainlabels.append(1.0)
 
-        endlabel = int(story[-1])
-        if endlabel == 1:
-            traindata.append(story[:5])
-            trainlabels.append(1.0)
+        if torch.rand(()) > 0.5:
+            index = torch.randint(4, ()).item()
 
-            traindata.append(story[:4] + story[5:6])
-            trainlabels.append(0.0)     
-        else:
-            traindata.append(story[:5])
+            tmp = story[index]
+            tmps = story[index+1:5]
+            story[index:-1] = tmps
+            story[4] = tmp
+
+            traindata.append(story)
             trainlabels.append(0.0)
 
-            traindata.append(story[:4] + story[5:6])
-            trainlabels.append(1.0)     
+    # csvdata = pandas.read_csv('../Data/val.csv')
+    # length = int(len(csvdata)/5*4)
+    # traindata = []
+    # trainlabels = []
+    # for i in range(length):
+    #     story = list(csvdata.loc[i])
+
+    #     endlabel = int(story[-1])
+    #     if endlabel == 1:
+    #         traindata.append(story[:5])
+    #         trainlabels.append(1.0)
+
+    #         traindata.append(story[:4] + story[5:6])
+    #         trainlabels.append(0.0)     
+    #     else:
+    #         traindata.append(story[:5])
+    #         trainlabels.append(0.0)
+
+    #         traindata.append(story[:4] + story[5:6])
+    #         trainlabels.append(1.0)     
 
     trainSet = data.TrainDataSet(traindata, model_dict, trainlabels)
     TrainLoader = DataLoader(trainSet, batch_size=options.BS, shuffle=True, num_workers=4, drop_last=False, collate_fn=data.train_collate_fn)
@@ -147,7 +149,7 @@ def main():
         fnetlstm[i].cuda()
         fnetcnn.append(netModel.CNN())
         fnetcnn[i].cuda()
-    predictor = netModel.Predictor(400)
+    predictor = netModel.Predictor(200)
     predictor.cuda()
 
     opt_lstm = []
@@ -160,6 +162,8 @@ def main():
 
 
     print('start training...')
+
+    curmax_acc = 0
 
     for epoch in range(100000):
 
@@ -174,7 +178,8 @@ def main():
             labels = labels.cuda()
 
             for i, s in enumerate(sentences):
-                features.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                # features.append(torch.cat((fnetlstm[i](s), fnetcnn[i](s)), dim=1))
+                features.append(fnetlstm[i](s))
 
             output = predictor(features[0], features[1], features[2], features[3], features[4])
 
@@ -182,18 +187,18 @@ def main():
 
             for i in range(5):
                 opt_lstm[i].zero_grad()
-                opt_cnn[i].zero_grad()
+                # opt_cnn[i].zero_grad()
             opt_p.zero_grad()
             
             loss.backward()
             for i in range(5):
                 torch.nn.utils.clip_grad_norm_(fnetlstm[i].parameters(), max_norm=0.2, norm_type=2)
-                torch.nn.utils.clip_grad_norm_(fnetcnn[i].parameters(), max_norm=0.2, norm_type=2)
+                # torch.nn.utils.clip_grad_norm_(fnetcnn[i].parameters(), max_norm=0.2, norm_type=2)
             torch.nn.utils.clip_grad_norm_(predictor.parameters(), max_norm=0.5, norm_type=2)
 
             for i in range(5):
                 opt_lstm[i].step()
-                opt_cnn[i].step()
+                # opt_cnn[i].step()
             opt_p.step()
 
             # print(' [{}/{}]: {}'.format(step, len(TrainLoader), loss.item()))
@@ -205,10 +210,13 @@ def main():
         acc = validation(ValLoader, fnetlstm, fnetcnn, predictor)
         writer.add_scalar('val_acc', acc, epoch)
 
+        curmax_acc = max(curmax_acc, acc)
+
         logging.info('validation acc: {}'.format(acc))
+        logging.info('validation best acc: {}'.format(curmax_acc))
 
         for i in range(5):
-            torch.save(fnetlstm[i].state_dict(), options.logdir+'lstm' + str(i) + '/epoch' + str(epoch) + '.para')
+            # torch.save(fnetlstm[i].state_dict(), options.logdir+'lstm' + str(i) + '/epoch' + str(epoch) + '.para')
             torch.save(fnetcnn[i].state_dict(),  options.logdir+'cnn' + str(i) + '/epoch' + str(epoch) + '.para')
         torch.save(predictor.state_dict(), options.logdir+'predictor' + '/epoch' + str(epoch) + '.para')
         logging.info('saving {}th epoch models'.format(epoch))

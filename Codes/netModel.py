@@ -143,16 +143,29 @@ class Predictor_FC(nn.Module):
     def __init__(self):
         super(Predictor_FC, self).__init__()
 
+        self.bodyfc = nn.Sequential(
+            nn.Linear(200, 100),
+            nn.SELU()
+        )
+
+        self.endfc = nn.Sequential(
+            nn.Linear(200, 100),
+            nn.SELU()
+        )
+
         self.fc = nn.Sequential( 
-            nn.Linear(800, 1),
+            nn.Linear(400, 1),
             nn.Sigmoid()
         )
 
-    def forward(self, body, end):
+    def forward(self, body_raw, end_raw):
         # body length * batchsize * hiddensize
         # end length * batchsize * hiddensize
         # label batchsize
 
+        body = self.bodyfc(body_raw)
+        end = self.endfc(end_raw)
+        
         # batchsize * hiddensize * 1
         AoA_h_end = functions.AoA(body, end)
 
